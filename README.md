@@ -1,8 +1,8 @@
-# capture the idea we are a reverse proxy for OpenAI
+# A reverse proxy for OpenAI API
 
 This is a reverse proxy for OpenAI, and supports chunked as well as non-chunked responses.
 This lets us handle the chunked responses from OpenAI, and also lets us use
-the asynchronous OpenAI API from the client application.
+the asynchronous OpenAI API from the client application as well as inside this proxy.
 
 
 ## Installation
