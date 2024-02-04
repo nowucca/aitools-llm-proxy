@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
+from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
+    RequestError
 from starlette.background import BackgroundTask
 import httpx
 import logging
@@ -56,9 +58,29 @@ async def proxy_openai(path: str, request: Request):
 
     cleaned_headers = await clean_headers(request_headers, OPENAI_API_KEY, OPENAI_ORG)
 
-    url = httpx.URL(path=api_path, query=request.url.query.encode("utf-8"))
-    rp_req = client.build_request(request_method, url, timeout=20.0, headers=cleaned_headers, content=request_content)
-    rp_resp = await client.send(rp_req, stream=True)
+    try:
+        url = httpx.URL(path=api_path, query=request.url.query.encode("utf-8"))
+        rp_req = client.build_request(request_method, url, timeout=20.0, headers=cleaned_headers,
+                                      content=request_content)
+        rp_resp = await client.send(rp_req, stream=True)
+    except Timeout:
+        raise HTTPException(status_code=408, detail="Request Timeout [aitools]")
+    except NetworkError:
+        raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
+    except HTTPStatusError:
+        raise HTTPException(status_code=400, detail="HTTP Status Error [aitools]")
+    except TooManyRedirects:
+        raise HTTPException(status_code=310, detail="Too Many Redirects [aitools]")
+    except InvalidURL:
+        raise HTTPException(status_code=400, detail="Invalid URL [aitools]")
+    except ConnectTimeout:
+        raise HTTPException(status_code=408, detail="Connect Timeout [aitools]")
+    except ReadTimeout:
+        raise HTTPException(status_code=408, detail="Read Timeout [aitools]")
+    except RequestError:
+        raise HTTPException(status_code=500, detail="Request Error [aitools]")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
 
     if rp_resp.status_code != 200:
         raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
