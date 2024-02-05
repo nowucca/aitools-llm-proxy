@@ -63,6 +63,9 @@ async def proxy_openai(path: str, request: Request):
         rp_req = client.build_request(request_method, url, timeout=20.0, headers=cleaned_headers,
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
+        if rp_resp.status_code != 200:
+            raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
+        rp_resp.raise_for_status()
     except Timeout:
         raise HTTPException(status_code=408, detail="Request Timeout [aitools]")
     except NetworkError:
@@ -82,8 +85,6 @@ async def proxy_openai(path: str, request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
 
-    if rp_resp.status_code != 200:
-        raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
 
     return StreamingResponse(
         rp_resp.aiter_raw(),
