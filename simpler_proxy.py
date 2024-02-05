@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
-    RequestError
+	RequestError, PoolTimeout
 from starlette.background import BackgroundTask
 import httpx
 import logging
@@ -63,14 +63,9 @@ async def proxy_openai(path: str, request: Request):
         rp_req = client.build_request(request_method, url, timeout=20.0, headers=cleaned_headers,
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
-        if rp_resp.status_code != 200:
-            raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
-    except HTTPException as e:
-        raise e
+
     except NetworkError:
         raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
-    except HTTPStatusError:
-        raise HTTPException(status_code=400, detail="HTTP Status Error [aitools]")
     except TooManyRedirects:
         raise HTTPException(status_code=310, detail="Too Many Redirects [aitools]")
     except InvalidURL:
@@ -81,9 +76,13 @@ async def proxy_openai(path: str, request: Request):
         raise HTTPException(status_code=408, detail="Read Timeout [aitools]")
     except RequestError:
         raise HTTPException(status_code=500, detail="Request Error [aitools]")
+    except PoolTimeout:
+        raise HTTPException(status_code=503, detail="Service Unavailable due to Pool Timeout [aitools]")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
 
+    if rp_resp.status_code != 200:
+        raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
 
     return StreamingResponse(
         rp_resp.aiter_raw(),
