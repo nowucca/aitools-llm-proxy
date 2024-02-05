@@ -65,9 +65,8 @@ async def proxy_openai(path: str, request: Request):
         rp_resp = await client.send(rp_req, stream=True)
         if rp_resp.status_code != 200:
             raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
-        rp_resp.raise_for_status()
-    except Timeout:
-        raise HTTPException(status_code=408, detail="Request Timeout [aitools]")
+    except HTTPException as e:
+        raise e
     except NetworkError:
         raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
     except HTTPStatusError:
