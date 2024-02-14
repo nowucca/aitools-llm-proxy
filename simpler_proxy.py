@@ -1,12 +1,17 @@
-from fastapi import FastAPI, Request, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
-	RequestError, PoolTimeout
-from starlette.background import BackgroundTask
-import httpx
 import logging
 import os
+import traceback
+
+import httpx
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import StreamingResponse
+from httpx import NetworkError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
+    RequestError, PoolTimeout
+from starlette.background import BackgroundTask
+from contextlib import asynccontextmanager
+
+from client_manager import ClientManager
 
 # Load .env file
 load_dotenv()
@@ -20,20 +25,39 @@ VERBOSE_LOGGING = os.getenv('VERBOSE_LOGGING', 'false').lower() == 'true'
 OPENAI_TIMEOUT = int(os.getenv('OPENAI_TIMEOUT', 60))
 OPENAI_TIMEOUT = max(1, min(OPENAI_TIMEOUT, 120))  # Ensure between 1 and 120 seconds
 
+logger = logging.getLogger(__name__)
+
 # Configure logging based on VERBOSE_LOGGING
 if VERBOSE_LOGGING:
-    logging.basicConfig(level=logging.DEBUG)
-    httpx_logger = logging.getLogger("httpx")
-    httpx_logger.setLevel(logging.DEBUG)
-    httpcore_logger = logging.getLogger("httpcore")
-    httpcore_logger.setLevel(logging.DEBUG)
+    # Configure logging with a specific format including a timestamp
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logging.getLogger("httpx").setLevel(logging.DEBUG)
+    logging.getLogger("httpcore").setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
 else:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI()
-client = httpx.AsyncClient(base_url=OPENAI_API_BASE_URL)
+client_manager: ClientManager | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client_manager
+    client_manager = ClientManager(base_url=OPENAI_API_BASE_URL, timeout=OPENAI_TIMEOUT)
+    yield
+    # Clean up the ML models and release the resources
+    await client_manager.close()
 
 
 async def clean_headers(headers: dict, api_key: str, org: str) -> dict:
@@ -50,7 +74,8 @@ async def proxy_openai(path: str, request: Request):
 
         :param path: The full path from the incoming request, including the 'openai/' prefix if present.
         :param request: The incoming request with headers, method, etc.
-        """
+    """
+    client = await client_manager.get_client()
 
     # Remove 'openai/' prefix from the path, if it exists
     api_path = path[len('openai/'):] if path.startswith('openai/') else path
@@ -66,25 +91,46 @@ async def proxy_openai(path: str, request: Request):
         rp_req = client.build_request(request_method, url, timeout=OPENAI_TIMEOUT, headers=cleaned_headers,
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
-
-    except NetworkError:
-        raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
-    except TooManyRedirects:
-        raise HTTPException(status_code=310, detail="Too Many Redirects [aitools]")
-    except InvalidURL:
-        raise HTTPException(status_code=400, detail="Invalid URL [aitools]")
-    except ConnectTimeout:
-        raise HTTPException(status_code=408, detail="Connect Timeout [aitools]")
-    except ReadTimeout:
-        raise HTTPException(status_code=408, detail="Read Timeout [aitools]")
-    except RequestError:
-        raise HTTPException(status_code=500, detail="Request Error [aitools]")
-    except PoolTimeout:
-        raise HTTPException(status_code=503, detail="Service Unavailable due to Pool Timeout [aitools]")
+    except ReadTimeout as e:
+        error_detail = f"Read Timeout [aitools] - Error: {e}"
+        logger.error(f"ReadTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=408, detail=error_detail)
+    except ConnectTimeout as e:
+        await client_manager.increment_error()
+        error_detail = f"Connect Timeout [aitools] - Error: {e}"
+        logger.error(f"ConnectTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=408, detail=error_detail)
+    except PoolTimeout as e:
+        await client_manager.increment_error()
+        error_detail = f"Service Unavailable due to Pool Timeout [aitools] - Error: {e}"
+        logger.error(f"PoolTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=503, detail=error_detail)
+    except NetworkError as e:
+        await client_manager.increment_error()
+        error_detail = f"Service Unavailable [aitools] - Error: {e}"
+        logger.error(f"NetworkError encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=503, detail=error_detail)
+    except TooManyRedirects as e:
+        error_detail = f"Too Many Redirects [aitools] - Error: {e}"
+        logger.error(f"TooManyRedirects encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=310, detail=error_detail)
+    except InvalidURL as e:
+        error_detail = f"Invalid URL [aitools] - Error: {e}"
+        logger.error(f"InvalidURL encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=error_detail)
+    except RequestError as e:
+        await client_manager.increment_error()
+        error_detail = f"Request Error [aitools] - Error: {e}"
+        logger.error(f"RequestError encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
+        await client_manager.increment_error()
+        error_detail = f"Unknown Error [aitools] - Error: {e}"
+        logger.error(f"Unknown Error encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
     if rp_resp.status_code != 200:
+        logger.error(f"Non-200 status code: {rp_resp.status_code}/{rp_resp.reason_phrase}. Traceback: {rp_resp.text}")
         raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
 
     return StreamingResponse(
