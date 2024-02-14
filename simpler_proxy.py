@@ -1,7 +1,9 @@
+import traceback
+
 from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
-	RequestError, PoolTimeout
+    RequestError, PoolTimeout
 from starlette.background import BackgroundTask
 import httpx
 import logging
@@ -20,21 +22,30 @@ VERBOSE_LOGGING = os.getenv('VERBOSE_LOGGING', 'false').lower() == 'true'
 OPENAI_TIMEOUT = int(os.getenv('OPENAI_TIMEOUT', 60))
 OPENAI_TIMEOUT = max(1, min(OPENAI_TIMEOUT, 120))  # Ensure between 1 and 120 seconds
 
+logger = logging.getLogger(__name__)
+
 # Configure logging based on VERBOSE_LOGGING
 if VERBOSE_LOGGING:
-    logging.basicConfig(level=logging.DEBUG)
-    httpx_logger = logging.getLogger("httpx")
-    httpx_logger.setLevel(logging.DEBUG)
-    httpcore_logger = logging.getLogger("httpcore")
-    httpcore_logger.setLevel(logging.DEBUG)
+    # Configure logging with a specific format including a timestamp
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logging.getLogger("httpx").setLevel(logging.DEBUG)
+    logging.getLogger("httpcore").setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
 else:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI()
 client = httpx.AsyncClient(base_url=OPENAI_API_BASE_URL)
-
 
 async def clean_headers(headers: dict, api_key: str, org: str) -> dict:
     cleaned_headers = {k: v for k, v in headers.items() if k.lower() not in ['host', 'authorization']}
@@ -67,20 +78,25 @@ async def proxy_openai(path: str, request: Request):
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
 
-    except NetworkError:
+    except NetworkError as e:
+        traceback.print_exc()
         raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
-    except TooManyRedirects:
+    except TooManyRedirects as e:
+        traceback.print_exc()
         raise HTTPException(status_code=310, detail="Too Many Redirects [aitools]")
-    except InvalidURL:
+    except InvalidURL as e:
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail="Invalid URL [aitools]")
-    except ConnectTimeout:
+    except ConnectTimeout as e:
+        traceback.print_exc()
         raise HTTPException(status_code=408, detail="Connect Timeout [aitools]")
-    except ReadTimeout:
+    except ReadTimeout as e:
+        traceback.print_exc()
         raise HTTPException(status_code=408, detail="Read Timeout [aitools]")
-    except RequestError:
-        raise HTTPException(status_code=500, detail="Request Error [aitools]")
-    except PoolTimeout:
+    except PoolTimeout as e:
         raise HTTPException(status_code=503, detail="Service Unavailable due to Pool Timeout [aitools]")
+    except RequestError as e:
+        raise HTTPException(status_code=500, detail="Request Error [aitools]")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
 
