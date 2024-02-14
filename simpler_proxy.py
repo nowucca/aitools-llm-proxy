@@ -10,7 +10,7 @@ from httpx import NetworkError, TooManyRedirects, InvalidURL, ConnectTimeout, Re
     RequestError, PoolTimeout
 from starlette.background import BackgroundTask
 from contextlib import asynccontextmanager
-
+from typing import Union
 from client_manager import ClientManager
 
 # Load .env file
@@ -48,7 +48,7 @@ else:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI()
-client_manager: ClientManager | None = None
+client_manager: Union[ClientManager,None] = None
 
 
 @asynccontextmanager
