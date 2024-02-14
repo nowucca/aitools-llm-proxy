@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from httpx import NetworkError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
     RequestError, PoolTimeout
 from starlette.background import BackgroundTask
+from contextlib import asynccontextmanager
 
 from client_manager import ClientManager
 
@@ -50,14 +51,12 @@ app = FastAPI()
 client_manager: ClientManager | None = None
 
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global client_manager
     client_manager = ClientManager(base_url=OPENAI_API_BASE_URL, timeout=OPENAI_TIMEOUT)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    yield
+    # Clean up the ML models and release the resources
     await client_manager.close()
 
 
