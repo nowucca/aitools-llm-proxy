@@ -1,14 +1,14 @@
-import traceback
-
-from fastapi import FastAPI, Request, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
-    RequestError, PoolTimeout
-from starlette.background import BackgroundTask
-import httpx
 import logging
 import os
+import traceback
+
+import httpx
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import StreamingResponse
+from httpx import NetworkError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
+    RequestError, PoolTimeout
+from starlette.background import BackgroundTask
 
 # Load .env file
 load_dotenv()
@@ -47,6 +47,7 @@ else:
 app = FastAPI()
 client = httpx.AsyncClient(base_url=OPENAI_API_BASE_URL)
 
+
 async def clean_headers(headers: dict, api_key: str, org: str) -> dict:
     cleaned_headers = {k: v for k, v in headers.items() if k.lower() not in ['host', 'authorization']}
     cleaned_headers['Authorization'] = f'Bearer {api_key}'
@@ -77,28 +78,38 @@ async def proxy_openai(path: str, request: Request):
         rp_req = client.build_request(request_method, url, timeout=OPENAI_TIMEOUT, headers=cleaned_headers,
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
-
-    except NetworkError as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=503, detail="Service Unavailable [aitools]")
-    except TooManyRedirects as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=310, detail="Too Many Redirects [aitools]")
-    except InvalidURL as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail="Invalid URL [aitools]")
-    except ConnectTimeout as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=408, detail="Connect Timeout [aitools]")
     except ReadTimeout as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=408, detail="Read Timeout [aitools]")
+        error_detail = f"Read Timeout [aitools] - Error: {e}"
+        logger.error(f"ReadTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=408, detail=error_detail)
+    except ConnectTimeout as e:
+        error_detail = f"Connect Timeout [aitools] - Error: {e}"
+        logger.error(f"ConnectTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=408, detail=error_detail)
     except PoolTimeout as e:
-        raise HTTPException(status_code=503, detail="Service Unavailable due to Pool Timeout [aitools]")
+        error_detail = f"Service Unavailable due to Pool Timeout [aitools] - Error: {e}"
+        logger.error(f"PoolTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=503, detail=error_detail)
+    except NetworkError as e:
+        error_detail = f"Service Unavailable [aitools] - Error: {e}"
+        logger.error(f"NetworkError encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=503, detail=error_detail)
+    except TooManyRedirects as e:
+        error_detail = f"Too Many Redirects [aitools] - Error: {e}"
+        logger.error(f"TooManyRedirects encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=310, detail=error_detail)
+    except InvalidURL as e:
+        error_detail = f"Invalid URL [aitools] - Error: {e}"
+        logger.error(f"InvalidURL encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=error_detail)
     except RequestError as e:
-        raise HTTPException(status_code=500, detail="Request Error [aitools]")
+        error_detail = f"Request Error [aitools] - Error: {e}"
+        logger.error(f"RequestError encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e) + " [aitools]")
+        error_detail = f"Unknown Error [aitools] - Error: {e}"
+        logger.error(f"Unknown Error encountered: {e}. Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
     if rp_resp.status_code != 200:
         raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
