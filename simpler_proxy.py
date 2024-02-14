@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from httpx import Timeout, NetworkError, HTTPStatusError, TooManyRedirects, InvalidURL, ConnectTimeout, ReadTimeout, \
 	RequestError, PoolTimeout
@@ -16,6 +16,9 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_API_BASE_URL = os.getenv('OPENAI_API_BASE_URL')
 OPENAI_ORG = os.getenv('OPENAI_ORG')
 VERBOSE_LOGGING = os.getenv('VERBOSE_LOGGING', 'false').lower() == 'true'
+# Load and validate OPENAI_TIMEOUT
+OPENAI_TIMEOUT = int(os.getenv('OPENAI_TIMEOUT', 60))
+OPENAI_TIMEOUT = max(1, min(OPENAI_TIMEOUT, 120))  # Ensure between 1 and 120 seconds
 
 # Configure logging based on VERBOSE_LOGGING
 if VERBOSE_LOGGING:
@@ -60,7 +63,7 @@ async def proxy_openai(path: str, request: Request):
 
     try:
         url = httpx.URL(path=api_path, query=request.url.query.encode("utf-8"))
-        rp_req = client.build_request(request_method, url, timeout=20.0, headers=cleaned_headers,
+        rp_req = client.build_request(request_method, url, timeout=OPENAI_TIMEOUT, headers=cleaned_headers,
                                       content=request_content)
         rp_resp = await client.send(rp_req, stream=True)
 
