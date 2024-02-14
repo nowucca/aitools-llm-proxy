@@ -10,6 +10,8 @@ from httpx import NetworkError, TooManyRedirects, InvalidURL, ConnectTimeout, Re
     RequestError, PoolTimeout
 from starlette.background import BackgroundTask
 
+from client_manager import ClientManager
+
 # Load .env file
 load_dotenv()
 
@@ -45,7 +47,18 @@ else:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI()
-client = httpx.AsyncClient(base_url=OPENAI_API_BASE_URL)
+client_manager: ClientManager | None = None
+
+
+@app.on_event("startup")
+async def startup_event():
+    global client_manager
+    client_manager = ClientManager(base_url=OPENAI_API_BASE_URL, timeout=OPENAI_TIMEOUT)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await client_manager.close()
 
 
 async def clean_headers(headers: dict, api_key: str, org: str) -> dict:
@@ -62,7 +75,8 @@ async def proxy_openai(path: str, request: Request):
 
         :param path: The full path from the incoming request, including the 'openai/' prefix if present.
         :param request: The incoming request with headers, method, etc.
-        """
+    """
+    client = await client_manager.get_client()
 
     # Remove 'openai/' prefix from the path, if it exists
     api_path = path[len('openai/'):] if path.startswith('openai/') else path
@@ -87,10 +101,12 @@ async def proxy_openai(path: str, request: Request):
         logger.error(f"ConnectTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=408, detail=error_detail)
     except PoolTimeout as e:
+        await client_manager.increment_error()
         error_detail = f"Service Unavailable due to Pool Timeout [aitools] - Error: {e}"
         logger.error(f"PoolTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=503, detail=error_detail)
     except NetworkError as e:
+        await client_manager.increment_error()
         error_detail = f"Service Unavailable [aitools] - Error: {e}"
         logger.error(f"NetworkError encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=503, detail=error_detail)
@@ -107,12 +123,13 @@ async def proxy_openai(path: str, request: Request):
         logger.error(f"RequestError encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_detail)
     except Exception as e:
+        await client_manager.increment_error()
         error_detail = f"Unknown Error [aitools] - Error: {e}"
         logger.error(f"Unknown Error encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_detail)
 
     if rp_resp.status_code != 200:
-        logger.error(f"Non-200 status code from OpenAI API: {rp_resp.status_code}/{rp_resp.reason_phrase}. Traceback: {rp_resp.text}")
+        logger.error(f"Non-200 status code: {rp_resp.status_code}/{rp_resp.reason_phrase}. Traceback: {rp_resp.text}")
         raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
 
     return StreamingResponse(
