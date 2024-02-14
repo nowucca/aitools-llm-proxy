@@ -1,5 +1,5 @@
 import logging
-from httpx import AsyncClient
+from httpx import AsyncClient, Limits
 
 
 class ClientManager:
@@ -8,8 +8,10 @@ class ClientManager:
         self.timeout = timeout
         self.error_threshold = error_threshold
         self.error_counter = 0
-        self.client = AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        self.limits = Limits(max_connections=200, max_keepalive_connections=20)
+        self.client: AsyncClient = AsyncClient(base_url=self.base_url, timeout=self.timeout, limits=self.limits)
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Initialized HTTP client with base URL {self.base_url} and timeout {self.timeout} and limits {self.limits}")
 
     async def reset_client(self):
         try:
@@ -21,9 +23,11 @@ class ClientManager:
             self.logger.info(f"Resetting HTTP client after {self.error_counter}/{self.error_threshold} errors seen.")
             self.client = AsyncClient(base_url=self.base_url, timeout=self.timeout)
             self.error_counter = 0
+            self.logger.info(f"Reset HTTP client with base URL {self.base_url} and timeout {self.timeout} and limits {self.limits}")
 
     async def increment_error(self):
         self.error_counter += 1
+        self.logger.error(f"Incrementing error counter to {self.error_counter}/{self.error_threshold}")
         if self.error_counter >= self.error_threshold:
             await self.reset_client()
 

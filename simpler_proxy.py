@@ -48,13 +48,12 @@ else:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI()
-client_manager: Union[ClientManager,None] = None
+client_manager = ClientManager(base_url=OPENAI_API_BASE_URL, timeout=OPENAI_TIMEOUT)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client_manager
-    client_manager = ClientManager(base_url=OPENAI_API_BASE_URL, timeout=OPENAI_TIMEOUT)
     yield
     # Clean up the ML models and release the resources
     await client_manager.close()
