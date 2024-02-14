@@ -19,3 +19,11 @@ pip install -r requirements.txt
 source venv/bin/activate
 python3 simpler_proxy.py
 ```
+
+A sample .env file:
+```bash
+OPENAI_API_KEY=(from openai)
+OPENAI_API_BASE_URL=https://api.openai.com
+OPENAI_ORG=(from openai)
+VERBOSE_LOGGING=false
+```
