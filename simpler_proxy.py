@@ -96,6 +96,7 @@ async def proxy_openai(path: str, request: Request):
         logger.error(f"ReadTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=408, detail=error_detail)
     except ConnectTimeout as e:
+        await client_manager.increment_error()
         error_detail = f"Connect Timeout [aitools] - Error: {e}"
         logger.error(f"ConnectTimeout encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=408, detail=error_detail)
@@ -118,6 +119,7 @@ async def proxy_openai(path: str, request: Request):
         logger.error(f"InvalidURL encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=400, detail=error_detail)
     except RequestError as e:
+        await client_manager.increment_error()
         error_detail = f"Request Error [aitools] - Error: {e}"
         logger.error(f"RequestError encountered: {e}. Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_detail)
