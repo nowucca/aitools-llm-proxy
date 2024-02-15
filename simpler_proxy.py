@@ -129,8 +129,7 @@ async def proxy_openai(path: str, request: Request):
         raise HTTPException(status_code=500, detail=error_detail)
 
     if rp_resp.status_code != 200:
-        logger.error(f"Non-200 status code: {rp_resp.status_code}/{rp_resp.reason_phrase}. Traceback: {rp_resp.text}")
-        raise HTTPException(status_code=rp_resp.status_code, detail=rp_resp.reason_phrase)
+        logger.error(f"Non-200 status code from openai: {rp_resp.status_code}")
 
     return StreamingResponse(
         rp_resp.aiter_raw(),
