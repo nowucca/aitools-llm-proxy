@@ -1,0 +1,6 @@
+anthropic==0.34.1
+openai==1.42.0
+pytest
+pytest-asyncio
+httpx
+python-dotenv
