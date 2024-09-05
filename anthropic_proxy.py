@@ -36,11 +36,12 @@ async def lifespan(app: FastAPI):
 
 
 async def clean_headers(headers: dict, api_key: str) -> dict:
-    cleaned_headers = {k: v for k, v in headers.items() if k.lower() not in ['host', 'authorization',
-                                                                             'content-type', 'anthropic-version']}
+    cleaned_headers = {k: v for k, v in headers.items() if k.lower() in ['accept', 'connection', 'user-agent',
+                                                                         'content-length']}
     cleaned_headers['x-api-key'] = f'{api_key}'
     cleaned_headers['content-type'] = f'application/json'
     cleaned_headers['anthropic-version'] = '2023-06-01'
+    cleaned_headers['accept'] = '*/*'
     return cleaned_headers
 
 
@@ -50,13 +51,27 @@ async def proxy_anthropic(path: str, request: Request):
 
     request_method = request.method
     request_headers = dict(request.headers)
-    request_content = request.stream()
+    VERBOSE_LOGGING = os.getenv('VERBOSE_LOGGING', 'false').lower()=='true'
+
+    if VERBOSE_LOGGING:
+        request_content = await request.body()
+        logger.debug(f"Request content: {request_content.decode('utf-8')}")
+    else:
+        request_content = request.stream()
 
     cleaned_headers = await clean_headers(request_headers, ANTHROPIC_API_KEY)
 
     try:
         url = httpx.URL(path=api_path, query=request.url.query.encode("utf-8"))
         rp_req = client.build_request(request_method, url, timeout=60, headers=cleaned_headers, content=request_content)
+
+        if VERBOSE_LOGGING:
+            # Log the request details before sending
+            logger.debug(f"Request method: {rp_req.method}")
+            logger.debug(f"Request URL: {rp_req.url}")
+            logger.debug(f"Request headers: {rp_req.headers}")
+
+
         rp_resp = await client.send(rp_req, stream=True)
     except ReadTimeout as e:
         error_detail = f"Read Timeout [aitools] - Error: {e}"

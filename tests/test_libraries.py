@@ -63,7 +63,7 @@ async def test_openai_api():
 @pytest.mark.asyncio
 async def test_anthropic_api():
     # Initialize the Anthropic client with dummy values pointing to the proxy
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_BASE_URL, base_url=ANTHROPIC_API_BASE_URL)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, base_url=ANTHROPIC_API_BASE_URL)
 
     # Construct the request payload for Anthropic through the proxy
     response = client.messages.create(
